@@ -185,5 +185,7 @@ class FactorStrategy(BaseStrategy):
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
         engine = FactorEngine(data)
         score = engine.composite_score(self.weights)
+        # 将得分后移一天，防止用当日数据预测当日信号的前视偏差
+        score = score.shift(1)
         signals = engine.generate_signals_from_score(score, self.top_pct, self.bottom_pct)
         return signals

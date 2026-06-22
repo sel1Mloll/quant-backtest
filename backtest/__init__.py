@@ -21,5 +21,6 @@ from .strategies import (
 from .metrics import calculate_metrics
 from .data_fetcher import DataFetcher
 from .factors import FactorEngine, FactorStrategy
+from .risk_manager import BasePositionSizer, FixedRatioSizer, KellySizer
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

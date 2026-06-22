@@ -11,5 +11,8 @@ matplotlib>=3.7.0
 # 科学计算
 scipy>=1.10.0
 
+# 测试
+pytest>=7.0.0
+
 # Jupyter Notebook (可选，用于分析报告)
 jupyter>=1.0.0

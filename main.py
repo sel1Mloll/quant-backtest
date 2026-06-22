@@ -1,4 +1,4 @@
-﻿"""A股量化回测系统 - 主入口"""
+"""A股量化回测系统 - 主入口"""
 
 import os
 import sys
@@ -11,6 +11,7 @@ from backtest.strategies import (
 )
 from backtest.engine import BacktestEngine
 from backtest.factors import FactorStrategy
+from backtest.risk_manager import FixedRatioSizer, KellySizer
 
 
 def main():
@@ -91,19 +92,48 @@ def main():
     if "volume" not in df.columns and "amount" in df.columns:
         df["volume"] = df["amount"]
 
-    # 3. 运行回测
+    # 3. 风控设置
+    print("\n风控设置（回车使用默认值，即不启用）:")
+    commission = input("  佣金费率（如 0.0003=万三，默认 0）: ") or "0"
+    slippage = input("  滑点比例（如 0.001=千一，默认 0）: ") or "0"
+    stop_loss = input("  止损比例（如 0.05=5%，默认 0 不启用）: ") or "0"
+
+    print("  仓位管理:")
+    print("    0. 不启用（默认，全仓）")
+    print("    1. 固定比例（如 50%）")
+    print("    2. 凯利公式")
+    sizing_choice = input("  请选择 (0/1/2): ") or "0"
+
+    risk_manager = None
+    if sizing_choice == "1":
+        frac = float(input("    仓位比例（如 0.5=50%，默认 0.5）: ") or "0.5")
+        risk_manager = FixedRatioSizer(fraction=frac)
+    elif sizing_choice == "2":
+        wr = float(input("    胜率（如 0.55=55%，默认 0.5）: ") or "0.5")
+        aw = float(input("    平均盈利率（如 0.03=3%，默认 0.03）: ") or "0.03")
+        al = float(input("    平均亏损率（如 0.02=2%，默认 0.02）: ") or "0.02")
+        hk = input("    使用半凯利（y/n，默认 y）: ") or "y"
+        risk_manager = KellySizer(win_rate=wr, avg_win=aw, avg_loss=al, half_kelly=(hk.lower() == "y"))
+
+    # 4. 运行回测
     print(f"\n运行回测 - 策略: {strategy.name}")
-    engine = BacktestEngine(df, strategy)
+    engine = BacktestEngine(
+        df, strategy,
+        commission_rate=float(commission),
+        slippage=float(slippage),
+        stop_loss=float(stop_loss),
+        risk_manager=risk_manager,
+    )
     metrics, benchmark = engine.run()
 
-    # 4. 输出结果
+    # 5. 输出结果
     print("\n" + "=" * 40)
     print("回测结果")
     print("=" * 40)
     for k, v in metrics.items():
         print(f"{k}: {v}")
 
-    # 5. 交易记录
+    # 6. 交易记录
     trades = engine.get_trade_log()
     if len(trades) > 0:
         trade_date_col = trades.columns[0]
@@ -118,7 +148,7 @@ def main():
     else:
         print("\n无交易记录")
 
-    # 6. 保存图表
+    # 7. 保存图表
     save_dir = "outputs"
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, f"{strategy.name}_result.png")
