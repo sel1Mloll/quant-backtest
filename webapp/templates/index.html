@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股量化回测系统</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg0:#0b1420;--bg1:#111b27;--bg2:#162031;--bg3:#1a2740;--border:#1e3048;--text:#e2e8f0;--text2:#8899aa;--text3:#556677;--accent:#2979ff;--accent2:#448aff;--green:#00c853;--red:#ff1744}
+body{font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background:var(--bg0);color:var(--text);font-size:13px;line-height:1.5;height:100vh;overflow:hidden}
+#app{display:flex;height:100vh}
+#sidebar{width:300px;min-width:300px;background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
+#sidebar h1{font-size:16px;padding:18px 20px 14px;border-bottom:1px solid var(--border);letter-spacing:1px;color:var(--accent)}
+.sec{padding:14px 20px;border-bottom:1px solid var(--border)}
+.sec h3{font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}
+.fg{margin-bottom:10px}
+.fg label{display:block;font-size:11px;color:var(--text2);margin-bottom:3px}
+.fg input,.fg select{width:100%;padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:13px;outline:none}
+.fg input:focus,.fg select:focus{border-color:var(--accent)}
+.fg input[type=number]{-moz-appearance:textfield}
+.fg input::-webkit-outer-spin-button,.fg input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.fg-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#btn-run{margin:16px 20px;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;letter-spacing:1px;transition:background .2s}
+#btn-run:hover{background:var(--accent2)}
+#btn-run:disabled{opacity:.5;cursor:not-allowed}
+#main{flex:1;overflow-y:auto;padding:20px 24px 40px}
+#placeholder{display:flex;align-items:center;justify-content:center;height:100%;color:var(--text3);font-size:15px}
+#results{display:none}
+#loading{display:none;position:fixed;top:0;left:300px;right:0;bottom:0;background:rgba(11,20,32,.85);z-index:100;align-items:center;justify-content:center;flex-direction:column}
+#loading.show{display:flex}
+.spinner{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading p{margin-top:14px;color:var(--text2);font-size:14px}
+#error-msg{display:none;background:rgba(255,23,68,.12);border:1px solid var(--red);color:var(--red);padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:13px}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px}
+.kpi-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:14px 16px}
+.kpi-card .k-label{font-size:11px;color:var(--text2);margin-bottom:4px}
+.kpi-card .k-value{font-size:20px;font-weight:700}
+.pos{color:var(--green)}.neg{color:var(--red)}.neu{color:var(--accent)}
+.chart-box{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:16px}
+.chart-box h3{font-size:13px;color:var(--text2);margin-bottom:10px;font-weight:500}
+.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.ttable{width:100%;border-collapse:collapse;font-size:12px}
+.ttable th{background:var(--bg3);color:var(--text2);font-weight:500;text-align:left;padding:8px 12px;position:sticky;top:0}
+.ttable td{padding:7px 12px;border-bottom:1px solid var(--border)}
+.ttable tr:hover{background:rgba(41,121,255,.06)}
+.ttable-wrap{max-height:320px;overflow-y:auto}
+.data-info{font-size:11px;color:var(--text3);margin-bottom:14px;padding:8px 12px;background:var(--bg3);border-radius:4px;display:inline-block}
+@media(max-width:900px){.chart-row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <h1>A股量化回测</h1>
+    <div class="sec">
+      <h3>数据配置</h3>
+      <div class="fg">
+        <label>数据来源</label>
+        <select id="ds-source">
+          <option value="sample">内置样本数据（离线）</option>
+          <option value="real">腾讯接口实时数据</option>
+        </select>
+      </div>
+      <div class="fg" id="fg-symbol" style="display:none">
+        <label>股票代码</label>
+        <input id="ds-symbol" value="600519" placeholder="如 600519 贵州茅台">
+      </div>
+      <div class="fg">
+        <label>初始资金</label>
+        <input id="ds-capital" type="number" value="100000" min="1000" step="10000">
+      </div>
+    </div>
+    <div class="sec">
+      <h3>策略选择</h3>
+      <div class="fg">
+        <select id="strategy">
+          <option value="ma_cross">双均线交叉</option>
+          <option value="bollinger">布林带均值回归</option>
+          <option value="rsi">RSI 超买超卖</option>
+          <option value="macd">MACD 趋势跟踪</option>
+          <option value="volume_breakout">成交量突破</option>
+          <option value="momentum">动量策略</option>
+          <option value="factor">多因子策略</option>
+          <option value="buy_hold">买入持有（基准）</option>
+        </select>
+      </div>
+    </div>
+    <div class="sec" id="sec-params">
+      <h3>策略参数</h3>
+      <div id="params-fields"></div>
+    </div>
+    <div class="sec">
+      <h3>风控设置</h3>
+      <div class="fg-row">
+        <div class="fg"><label>佣金费率</label><input id="r-commission" type="number" value="0" min="0" max="0.01" step="0.0001"></div>
+        <div class="fg"><label>滑点比例</label><input id="r-slippage" type="number" value="0" min="0" max="0.01" step="0.0001"></div>
+      </div>
+      <div class="fg">
+        <label>止损比例（0=不启用）</label>
+        <input id="r-stoploss" type="number" value="0" min="0" max="0.5" step="0.01">
+      </div>
+      <div class="fg">
+        <label>仓位管理</label>
+        <select id="r-sizing">
+          <option value="none">全仓</option>
+          <option value="fixed">固定比例</option>
+          <option value="kelly">凯利公式</option>
+        </select>
+      </div>
+      <div id="r-fixed-fields" style="display:none">
+        <div class="fg"><label>仓位比例（0.5=50%）</label><input id="r-fraction" type="number" value="0.5" min="0.01" max="1" step="0.05"></div>
+      </div>
+      <div id="r-kelly-fields" style="display:none">
+        <div class="fg-row">
+          <div class="fg"><label>胜率</label><input id="r-winrate" type="number" value="0.5" step="0.01"></div>
+          <div class="fg"><label>平均盈利率</label><input id="r-avgwin" type="number" value="0.03" step="0.01"></div>
+        </div>
+        <div class="fg-row">
+          <div class="fg"><label>平均亏损率</label><input id="r-avgloss" type="number" value="0.02" step="0.01"></div>
+          <div class="fg"><label>半凯利</label><select id="r-halfkelly"><option value="true">是</option><option value="false">否</option></select></div>
+        </div>
+      </div>
+    </div>
+    <button id="btn-run" onclick="runBacktest()">运行回测</button>
+  </aside>
+  <div id="main">
+    <div id="placeholder">配置左侧参数，点击「运行回测」开始</div>
+    <div id="loading"><div class="spinner"></div><p>正在运行回测...</p></div>
+    <div id="results">
+      <div id="error-msg"></div>
+      <div id="data-info-bar"></div>
+      <div class="kpi" id="kpi-grid"></div>
+      <div class="chart-box"><h3>净值曲线</h3><div id="c-equity" style="height:400px"></div></div>
+      <div class="chart-row">
+        <div class="chart-box"><h3>回撤</h3><div id="c-dd" style="height:260px"></div></div>
+        <div class="chart-box"><h3>滚动夏普 (60日)</h3><div id="c-sr" style="height:260px"></div></div>
+      </div>
+      <div class="chart-row">
+        <div class="chart-box"><h3>月度收益热力图</h3><div id="c-heat" style="height:280px"></div></div>
+        <div class="chart-box"><h3>收益率分布</h3><div id="c-dist" style="height:280px"></div></div>
+      </div>
+      <div class="chart-box"><h3>交易记录</h3><div class="ttable-wrap"><table class="ttable" id="t-table"><thead><tr><th>日期</th><th>操作</th><th>价格</th></tr></thead><tbody></tbody></table></div></div>
+    </div>
+  </div>
+</div>
+<script>
+const SP={
+  ma_cross:[{k:'short_window',l:'短期窗口',d:5,min:2,max:100},{k:'long_window',l:'长期窗口',d:20,min:5,max:500}],
+  bollinger:[{k:'window',l:'窗口',d:20,min:5,max:100},{k:'num_std',l:'标准差倍数',d:2,min:0.5,max:5,step:0.1}],
+  rsi:[{k:'period',l:'RSI周期',d:14,min:2,max:100},{k:'oversold',l:'超卖线',d:30,min:10,max:50},{k:'overbought',l:'超买线',d:70,min:50,max:90}],
+  macd:[{k:'fast',l:'快线周期',d:12,min:2,max:50},{k:'slow',l:'慢线周期',d:26,min:5,max:100},{k:'signal',l:'信号线周期',d:9,min:2,max:50}],
+  volume_breakout:[{k:'lookback',l:'回溯天数',d:20,min:5,max:100},{k:'volume_ratio',l:'成交量倍数',d:1.5,min:1,max:5,step:0.1}],
+  momentum:[{k:'lookback',l:'回溯天数',d:20,min:5,max:200},{k:'threshold',l:'阈值',d:0.05,min:0.01,max:0.5,step:0.01}],
+  factor:[{k:'top_pct',l:'买入分位',d:0.2,min:0.05,max:0.5,step:0.05},{k:'bottom_pct',l:'卖出分位',d:0.2,min:0.05,max:0.5,step:0.05}],
+  buy_hold:[]
+};
+let charts={};
+document.addEventListener('DOMContentLoaded',()=>{
+  updateParams();
+  document.getElementById('strategy').onchange=updateParams;
+  document.getElementById('ds-source').onchange=function(){
+    document.getElementById('fg-symbol').style.display=this.value==='real'?'':'none';
+  };
+  document.getElementById('r-sizing').onchange=function(){
+    document.getElementById('r-fixed-fields').style.display=this.value==='fixed'?'':'none';
+    document.getElementById('r-kelly-fields').style.display=this.value==='kelly'?'':'none';
+  };
+  window.addEventListener('resize',()=>{Object.values(charts).forEach(c=>{try{c&&c.resize()}catch(e){}})});
+});
+function updateParams(){
+  const sk=document.getElementById('strategy').value;
+  const ps=SP[sk]||[];
+  document.getElementById('sec-params').style.display=ps.length?'':'none';
+  let h='';
+  ps.forEach(p=>{
+    const step=p.step||1;
+    h+='<div class="fg"><label>'+p.l+'</label><input id="sp-'+p.k+'" type="number" value="'+p.d+'" min="'+p.min+'" max="'+p.max+'" step="'+step+'"></div>';
+  });
+  document.getElementById('params-fields').innerHTML=h;
+}
+function v(id){return parseFloat(document.getElementById(id).value)}
+function vs(id){return document.getElementById(id).value}
+
+async function runBacktest(){
+  const btn=document.getElementById('btn-run');
+  btn.disabled=true;btn.textContent='运行中...';
+  document.getElementById('loading').classList.add('show');
+  document.getElementById('error-msg').style.display='none';
+  const sk=vs('strategy');
+  const params={};
+  (SP[sk]||[]).forEach(function(p){params[p.k]=v('sp-'+p.k)});
+  const body={
+    data_source:vs('ds-source'),symbol:vs('ds-symbol'),
+    initial_capital:v('ds-capital'),strategy:sk,params:params,
+    risk:{commission:v('r-commission'),slippage:v('r-slippage'),stop_loss:v('r-stoploss'),
+      sizing:vs('r-sizing'),fraction:v('r-fraction'),win_rate:v('r-winrate'),
+      avg_win:v('r-avgwin'),avg_loss:v('r-avgloss'),half_kelly:vs('r-halfkelly')==='true'}
+  };
+  try{
+    const res=await fetch('/api/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const data=await res.json();
+    if(!data.success)throw new Error(data.error);
+    render(data);
+  }catch(e){
+    var el=document.getElementById('error-msg');
+    el.textContent='错误: '+e.message;el.style.display='block';
+    document.getElementById('results').style.display='block';
+    document.getElementById('placeholder').style.display='none';
+  }finally{
+    btn.disabled=false;btn.textContent='运行回测';
+    document.getElementById('loading').classList.remove('show');
+  }
+}
+
+function render(d){
+  document.getElementById('placeholder').style.display='none';
+  document.getElementById('results').style.display='block';
+  var di=d.data_info;
+  document.getElementById('data-info-bar').innerHTML=
+    '<span class="data-info">'+d.strategy_name+' | 数据: '+di.total_rows+'条 '+di.start_date+' ~ '+di.end_date+'</span>';
+  try{renderKPI(d.metrics)}catch(e){console.error('KPI:',e)}
+  try{renderEquity(d.equity_curve,d.strategy_name)}catch(e){console.error('Equity:',e)}
+  try{renderDrawdown(d.drawdown)}catch(e){console.error('DD:',e)}
+  try{renderSharpe(d.rolling_sharpe)}catch(e){console.error('Sharpe:',e)}
+  try{renderHeatmap(d.monthly_returns)}catch(e){console.error('Heat:',e)}
+  try{renderDist(d.distribution)}catch(e){console.error('Dist:',e)}
+  try{renderTrades(d.trades)}catch(e){console.error('Trades:',e)}
+}
+
+var KPI_MAP=[['总收益率',''],['年化收益率',''],['夏普比率',''],['索提诺比率',''],['最大回撤','neg'],['年化波动率',''],['Calmar比率',''],['日胜率',''],['交易天数','neu']];
+function renderKPI(m){
+  var h='';
+  KPI_MAP.forEach(function(item){
+    var k=item[0],cls=item[1];
+    var val=m[k];if(val===undefined)return;
+    var c=cls;
+    if(!c&&k!=='交易天数'){
+      var n=parseFloat(String(val).replace('%','').replace('∞','0'));
+      c=n>0?'pos':n<0?'neg':'neu';
+    }
+    if(!c)c='neu';
+    h+='<div class="kpi-card"><div class="k-label">'+k+'</div><div class="k-value '+c+'">'+val+'</div></div>';
+  });
+  document.getElementById('kpi-grid').innerHTML=h;
+}
+
+var T={backgroundColor:'transparent',textStyle:{color:'#8899aa',fontFamily:'Microsoft YaHei'},
+  grid:{left:60,right:20,top:40,bottom:50},
+  tooltip:{trigger:'axis',backgroundColor:'#1a2740',borderColor:'#1e3048',textStyle:{color:'#e2e8f0',fontSize:12}},
+  xAxis:{type:'category',axisLine:{lineStyle:{color:'#1e3048'}},axisTick:{show:false},axisLabel:{color:'#556677',fontSize:10}},
+  yAxis:{type:'value',splitLine:{lineStyle:{color:'#1e3048',type:'dashed'}},axisLine:{show:false},axisLabel:{color:'#556677',fontSize:10}}};
+
+function renderEquity(eq,name){
+  if(charts.equity){try{charts.equity.dispose()}catch(e){}}
+  charts.equity=echarts.init(document.getElementById('c-equity'));
+  var opt={
+    backgroundColor:'transparent',
+    textStyle:{color:'#8899aa',fontFamily:'Microsoft YaHei'},
+    legend:{data:[name,'基准'],top:6,textStyle:{color:'#8899aa',fontSize:11}},
+    tooltip:{trigger:'axis',backgroundColor:'#1a2740',borderColor:'#1e3048',textStyle:{color:'#e2e8f0',fontSize:12}},
+    grid:{left:60,right:20,top:40,bottom:60},
+    xAxis:{type:'category',data:eq.dates,axisLine:{lineStyle:{color:'#1e3048'}},axisTick:{show:false},axisLabel:{color:'#556677',fontSize:10}},
+    yAxis:{type:'value',splitLine:{lineStyle:{color:'#1e3048',type:'dashed'}},axisLine:{show:false},axisLabel:{color:'#556677',fontSize:10,formatter:function(v){return (v/10000).toFixed(1)+'万'}}},
+    series:[
+      {name:name,type:'line',data:eq.values,smooth:true,symbol:'none',lineStyle:{width:2,color:'#2979ff'},
+       areaStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(41,121,255,.25)'},{offset:1,color:'rgba(41,121,255,.02)'}])}},
+      {name:'基准',type:'line',data:eq.benchmark,smooth:true,symbol:'none',lineStyle:{width:1.5,color:'#546e7a',type:'dashed'}}
+    ],
+    dataZoom:[{type:'inside'}]
+  };
+  charts.equity.setOption(opt,true);
+}
+
+function renderDrawdown(dd){
+  if(charts.dd){try{charts.dd.dispose()}catch(e){}}
+  charts.dd=echarts.init(document.getElementById('c-dd'));
+  var opt={
+    backgroundColor:'transparent',textStyle:{color:'#8899aa',fontFamily:'Microsoft YaHei'},
+    grid:{left:60,right:20,top:20,bottom:30},
+    tooltip:{trigger:'axis',backgroundColor:'#1a2740',borderColor:'#1e3048',textStyle:{color:'#e2e8f0',fontSize:12},
+      formatter:function(p){return p[0].axisValue+'<br>回撤: '+(p[0].value*100).toFixed(2)+'%'}},
+    xAxis:{type:'category',data:dd.dates,axisLine:{lineStyle:{color:'#1e3048'}},axisTick:{show:false},axisLabel:{show:false}},
+    yAxis:{type:'value',splitLine:{lineStyle:{color:'#1e3048',type:'dashed'}},axisLine:{show:false},axisLabel:{color:'#556677',fontSize:10,formatter:function(v){return (v*100).toFixed(0)+'%'}},max:0},
+    series:[{type:'line',data:dd.values,smooth:true,symbol:'none',lineStyle:{width:1,color:'#ff1744'},
+      areaStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(255,23,68,.4)'},{offset:1,color:'rgba(255,23,68,.05)'}])}}]
+  };
+  charts.dd.setOption(opt,true);
+}
+
+function renderSharpe(sr){
+  if(charts.sr){try{charts.sr.dispose()}catch(e){}}
+  charts.sr=echarts.init(document.getElementById('c-sr'));
+  var vals=sr.values.map(function(v){return v==null||isNaN(v)?0:v});
+  var opt={
+    backgroundColor:'transparent',textStyle:{color:'#8899aa',fontFamily:'Microsoft YaHei'},
+    grid:{left:60,right:20,top:20,bottom:30},
+    tooltip:{trigger:'axis',backgroundColor:'#1a2740',borderColor:'#1e3048',textStyle:{color:'#e2e8f0',fontSize:12},
+      formatter:function(p){return p[0].axisValue+'<br>夏普: '+p[0].value}},
+    xAxis:{type:'category',data:sr.dates,axisLine:{lineStyle:{color:'#1e3048'}},axisTick:{show:false},axisLabel:{show:false}},
+    yAxis:{type:'value',splitLine:{lineStyle:{color:'#1e3048',type:'dashed'}},axisLine:{show:false},axisLabel:{color:'#556677',fontSize:10}},
+    series:[{type:'line',data:vals,smooth:true,symbol:'none',lineStyle:{width:1.5,color:'#7c4dff'},
+      areaStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(124,77,255,.2)'},{offset:1,color:'rgba(124,77,255,.02)'}])}}]
+  };
+  charts.sr.setOption(opt,true);
+}
+
+function renderHeatmap(mr){
+  if(charts.heat){try{charts.heat.dispose()}catch(e){}}
+  charts.heat=echarts.init(document.getElementById('c-heat'));
+  var months=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  var yrs=mr.years.map(String);
+  var data=[];
+  var maxV=0.05;
+  mr.data.forEach(function(d){
+    if(d[2]!=null&&!isNaN(d[2])){
+      data.push([d[0],d[1],d[2]]);
+      if(Math.abs(d[2])>maxV)maxV=Math.abs(d[2]);
+    }
+  });
+  var opt={
+    backgroundColor:'transparent',textStyle:{color:'#8899aa',fontFamily:'Microsoft YaHei'},
+    tooltip:{backgroundColor:'#1a2740',borderColor:'#1e3048',textStyle:{color:'#e2e8f0'},
+      formatter:function(p){
+        if(!p.data||p.data[2]==null)return '';
+        var c=p.data[2]>=0?'#00c853':'#ff1744';
+        return yrs[p.data[1]]+' '+months[p.data[0]]+'<br>收益: <b style="color:'+c+'">'+(p.data[2]*100).toFixed(2)+'%</b>';
+      }},
+    grid:{left:60,right:20,top:10,bottom:50},
+    xAxis:{type:'category',data:months,splitArea:{show:true},axisLabel:{color:'#556677',fontSize:10}},
+    yAxis:{type:'category',data:yrs,splitArea:{show:true},axisLabel:{color:'#556677',fontSize:11}},
+    visualMap:{min:-maxV,max:maxV,calculable:true,orient:'horizontal',left:'center',bottom:0,
+      inRange:{color:['#ff1744','#162031','#00c853']},textStyle:{color:'#8899aa'},itemWidth:12,itemHeight:100},
+    series:[{type:'heatmap',data:data,
+      label:{show:true,fontSize:10,color:'#e2e8f0',formatter:function(p){return p.data[2]!=null?(p.data[2]*100).toFixed(1)+'%':''}},
+      emphasis:{itemStyle:{shadowBlur:6,shadowColor:'rgba(0,0,0,.5)'}}}]
+  };
+  charts.heat.setOption(opt,true);
+}
+
+function renderDist(dist){
+  if(charts.dist){try{charts.dist.dispose()}catch(e){}}
+  charts.dist=echarts.init(document.getElementById('c-dist'));
+  var mean=dist.mean,std=dist.std,bins=dist.bins,counts=dist.counts;
+  var gauss=bins.map(function(x){var z=(x-mean)/std;return Math.exp(-0.5*z*z)/(std*Math.sqrt(2*Math.PI))});
+  var colors=counts.map(function(_,i){return bins[i]>=0?'#00c853':'#ff1744'});
+  var opt={
+    backgroundColor:'transparent',textStyle:{color:'#8899aa',fontFamily:'Microsoft YaHei'},
+    title:{text:'均值: '+mean.toFixed(4)+'  标准差: '+std.toFixed(4)+'  偏度: '+dist.skew+'  峰度: '+dist.kurtosis,
+      right:10,top:5,textStyle:{color:'#556677',fontSize:11,fontWeight:'normal'}},
+    grid:{left:60,right:20,top:40,bottom:50},
+    tooltip:{trigger:'axis',backgroundColor:'#1a2740',borderColor:'#1e3048',textStyle:{color:'#e2e8f0',fontSize:12},
+      formatter:function(p){if(!p[0])return '';return '收益率: '+(p[0].axisValue*100).toFixed(2)+'%<br>密度: '+p[0].value.toFixed(2)}},
+    xAxis:{type:'category',data:bins.map(function(b){return b.toFixed(4)}),axisLine:{lineStyle:{color:'#1e3048'}},axisTick:{show:false},
+      axisLabel:{fontSize:9,rotate:30,color:'#556677',formatter:function(v){return (parseFloat(v)*100).toFixed(1)+'%'}}},
+    yAxis:{type:'value',splitLine:{lineStyle:{color:'#1e3048',type:'dashed'}},axisLine:{show:false},axisLabel:{color:'#556677',fontSize:10}},
+    series:[
+      {type:'bar',data:counts.map(function(c,i){return {value:c,itemStyle:{color:colors[i],opacity:0.6}}}),barMaxWidth:8},
+      {type:'line',data:gauss,smooth:true,symbol:'none',lineStyle:{color:'#ff9800',width:2,type:'dashed'}}
+    ]
+  };
+  charts.dist.setOption(opt,true);
+}
+
+function renderTrades(trades){
+  var tbody=document.querySelector('#t-table tbody');
+  if(!trades.length){tbody.innerHTML='<tr><td colspan="3" style="color:var(--text3);text-align:center;padding:20px">无交易记录</td></tr>';return}
+  var h='';
+  trades.forEach(function(t){
+    var c=t.action.indexOf('买')>=0?'pos':'neg';
+    h+='<tr><td>'+t.date+'</td><td class="'+c+'">'+t.action+'</td><td>'+t.price.toFixed(2)+'</td></tr>';
+  });
+  tbody.innerHTML=h;
+}
+</script>
+</body>
+</html>
